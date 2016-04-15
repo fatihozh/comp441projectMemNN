@@ -24,7 +24,7 @@ end
 ###
 
 #Dictionary initialization (adding each word in dataset to dictionary.)
-dict = Dict{ASCIIString,Int}()
+dict = Dict{ASCIIString,Float64}()
 dictdata = readdlm("/Users/fatihozhamaratli/Downloads/tasksv11/en/qa1_single-supporting-fact_train.txt",' ')
 for s in dictdata
     if(typeof(s)!=Int64&&s!="")
@@ -63,13 +63,13 @@ function O_module(memAry,x,y_memloc,trainmod,o1_costmodel)
     # by this configuration, the module needs supporting facts, which are locations of the related memories as onehot vec.
  #sizehint for memVec to be enough long(later-for performance)
     xmemVec = Float64[]
-    append!(xmemVec,x)
-    append!(xmemVec,vec(memAry))
+    #append!(xmemVec,x)
+    #append!(xmemVec,vec(memAry))
     
     if(trainmod)
-        train_o1(o1_costmodel, xmemVec, y_memloc, softloss,size(memAry,2))# related memory location probability maximization training
+        train_o1(o1_costmodel, x, memAry, y_memloc, softloss,size(memAry,2))# related memory location probability maximization training
     end
-    return forw(o1_costmodel, xmemVec;mem_length=size(memAry,2)) #returns probabilities of memorylocations
+    return forw(o1_costmodel, x, memAry;mem_length=size(memAry,2)) #returns probabilities of memorylocations
 end #O_module
 
 function R_module(mem1, x, y_answordloc, dict, trainmod,r_costmodel)
@@ -94,14 +94,15 @@ end #R_module
 
 #############################################################################################
 #Auxilary functions
-@knet function o1_cost(x; winit=Gaussian(0,.1),mem_length=14,pdrop=0.5,lr=0.01)
-    h    = wbf(x; out=50, f=:relu, winit=winit)
-    j    = wbf(h; out=50, f=:relu, winit=winit)
-    l    = wbf(j; out=50, f=:relu, winit=winit)
-    t    = wbf(l; out=50, f=:relu, winit=winit)
-    fndrop = drop(t; pdrop=pdrop)
+    @knet function o1_cost(x,memAry; winit=Gaussian(0,.1),mem_length=14,pdrop=0.5,lr=0.001,a=50)
+        u = par(init=winit, dims=(a,19))
+        m = transp(memAry)*transp(u)
+        n = u*x
+        r = m*n
+    #fndrop = drop(t; pdrop=pdrop)
     #t = repeat(x; frepeat=:wbf, nrepeat=10, out=30,f=:relu,winit=winit)
-    return wbf(t; out=mem_length, f=:soft, winit=winit)
+    t=wbf(r; out=mem_length, f=:soft, winit=winit)
+    return t
 end
 @knet function r_cost(x; winit=Gaussian(0,.1),dict_length=19)
     h    = wbf(x; out=30, f=:relu, winit=winit)
@@ -117,8 +118,8 @@ function train(f, data, loss)
         update!(f)
     end
 end
-function train_o1(o1_costmodel, xmemVec, y_memloc, loss, length)
-    forw(o1_costmodel,xmemVec;mem_length=length,dropout=true)
+function train_o1(o1_costmodel, x , memAry, y_memloc, loss, length)
+    forw(o1_costmodel,x, memAry;mem_length=length,dropout=false)
     #forw(o1_costmodel,xmemVec)
     back(o1_costmodel,y_memloc, loss)
     update!(o1_costmodel)
@@ -155,8 +156,8 @@ end
 #############################################################################################
     o1_costmodel = compile(:o1_cost)
     r_costmodel = compile(:r_cost)
-    olr=0.01
-    setp(o1_costmodel, lr=0.01)
+    olr=0.0001
+    setp(o1_costmodel, lr=olr)
     old=0
     ## Main Flow
     for(k=1:100)
@@ -185,7 +186,8 @@ end
             y_memloc[clu]=1
             trquestioncount+=1
             memLoc=O_module(memAry,newMem,y_memloc,trainmod,o1_costmodel)
-           
+           #println("memLoc",memLoc)
+            #println("clu",clu)
             dictn = copy(dict)
             dictn[ans] = 1
            if(clu==prob_vec2indice(memLoc))
@@ -235,7 +237,7 @@ print(k,"\t",trsum/trquestioncount,"\t")
             y_memloc[clu]=1
             
             memLoc=O_module(memAry,newMem,y_memloc,trainmod,o1_costmodel)
-            #println("memLoc",memLoc)
+            #println("test:memLoc",memLoc)
             #println("clu",clu)
             dictn = copy(dict)
             dictn[ans] = 1
@@ -262,7 +264,7 @@ print(k,"\t",trsum/trquestioncount,"\t")
                 olr =0.8 * olr
                 setp(o1_costmodel,lr=olr)
                
-               setp(o1_costmodel, pdrop=0.80)
+               setp(o1_costmodel, pdrop=0.50)
             
             end
              old=sum/questionquantity   

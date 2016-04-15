@@ -7,17 +7,25 @@ trainmod=true
 
 
 
-### Data parsing
-data = readdlm("/Users/fatihozhamaratli/Downloads/tasksv11/en/qa1_single-supporting-fact_test.txt",'\t')
+### Training Data parsing
+data = readdlm("/Users/fatihozhamaratli/Downloads/tasksv11/en/qa1_single-supporting-fact_train.txt",'\t')
 for i=1:size(data,1)
     data[i,1] = split(data[i,1],' ',limit=2,keep=true)
     #format: SubString{ASCIIString}["3","Where is John? "]                 "hallway"    1  
 end
 ###
 
+### Test Data parsing
+test_data = readdlm("/Users/fatihozhamaratli/Downloads/tasksv11/en/qa1_single-supporting-fact_test.txt",'\t')
+for i=1:size(test_data,1)
+    test_data[i,1] = split(test_data[i,1],' ',limit=2,keep=true)
+    #format: SubString{ASCIIString}["3","Where is John? "]                 "hallway"    1  
+end
+###
+
 #Dictionary initialization (adding each word in dataset to dictionary.)
 dict = Dict{ASCIIString,Int}()
-dictdata = readdlm("/Users/fatihozhamaratli/Downloads/tasksv11/en/qa1_single-supporting-fact_test.txt",' ')
+dictdata = readdlm("/Users/fatihozhamaratli/Downloads/tasksv11/en/qa1_single-supporting-fact_train.txt",' ')
 for s in dictdata
     if(typeof(s)!=Int64&&s!="")
         if(contains(s,"\t"))
@@ -31,7 +39,7 @@ end
 #
 
 # Memory Initialization
-memAry = Array(Float64,length(dict),size(data,1))
+memAry = zeros(Float64,length(dict),14)
 #
 
 #########################################################################################################
@@ -51,25 +59,25 @@ function G_module(memAry,newMem,memCount)
     memAry[:,memCount] = newMem   #updates memory by adding BoW vectors to the list of memories
 end #G_module
 
-function O_module(memAry,x,y_memloc,trainmod)
+function O_module(memAry,x,y_memloc,trainmod,o1_costmodel)
     # by this configuration, the module needs supporting facts, which are locations of the related memories as onehot vec.
  #sizehint for memVec to be enough long(later-for performance)
     xmemVec = Float64[]
     append!(xmemVec,x)
     append!(xmemVec,vec(memAry))
-    o1_costmodel = compile(:o1_cost)
+    
     if(trainmod)
-        train_o1(o1_costmodel, xmemVec, y_memloc, softloss,length(memAry))# related memory location probability maximization training
+        train_o1(o1_costmodel, xmemVec, y_memloc, softloss,size(memAry,2))# related memory location probability maximization training
     end
-    return forw(o1_costmodel, xmemVec;mem_length=length(memAry)) #returns probabilities of memorylocations
+    return forw(o1_costmodel, xmemVec;mem_length=size(memAry,2)) #returns probabilities of memorylocations
 end #O_module
 
-function R_module(memLoc, x, y_answordloc, dict, trainmod)
+function R_module(mem1, x, y_answordloc, dict, trainmod,r_costmodel)
 
     xansVec = Float64[]
     append!(xansVec,x)
-    append!(xansVec,memLoc)
-    r_costmodel = compile(:r_cost)
+    append!(xansVec,mem1)
+    
     words = collect(keys(dict))
     if(trainmod)
         train_r(r_costmodel, xansVec, y_answordloc, softloss, length(words))# related memory location probability maximization training
@@ -86,15 +94,19 @@ end #R_module
 
 #############################################################################################
 #Auxilary functions
-@knet function o1_cost(x; winit=Gaussian(0,.1),mem_length=57000)
-    h    = wbf(x; out=1, f=:copy, winit=winit)
-    j    = wbf(h; out=1, f=:copy, winit=winit)
-    return wbf(j; out=mem_length, f=:soft, winit=winit)
+@knet function o1_cost(x; winit=Gaussian(0,.1),mem_length=14)
+    h    = wbf(x; out=50, f=:relu, winit=winit)
+    j    = wbf(h; out=50, f=:relu, winit=winit)
+    l    = wbf(j; out=50, f=:relu, winit=winit)
+    t    = wbf(l; out=50, f=:relu, winit=winit)
+    #t = repeat(x; frepeat=:wbf, nrepeat=10, out=30,f=:relu,winit=winit)
+    return wbf(t; out=mem_length, f=:soft, winit=winit)
 end
 @knet function r_cost(x; winit=Gaussian(0,.1),dict_length=19)
-    h    = wbf(x; out=1, f=:copy, winit=winit)
-    j    = wbf(h; out=1, f=:copy, winit=winit)
-    return wbf(j; out=dict_length, f=:soft, winit=winit)
+    h    = wbf(x; out=30, f=:relu, winit=winit)
+    j    = wbf(h; out=30, f=:relu, winit=winit)
+    r = wbf(j; out=dict_length, f=:soft, winit=winit)
+    return r
 end
 
 function train(f, data, loss)
@@ -140,10 +152,16 @@ function prob_vec2indice(words)
 end
         
 #############################################################################################
-
-
+    o1_costmodel = compile(:o1_cost)
+    r_costmodel = compile(:r_cost)
+    setp(o1_costmodel, lr=0.001)
     ## Main Flow
-    memCount=1
+    for(k=1:60)
+       # println("epoch",k)
+        trainmod=true
+        memCount=1
+        trquestioncount=0
+        trsum=0
     for i=1:size(data,1)
         sen=data[i,1]
         ans=data[i,2]
@@ -152,7 +170,7 @@ end
         
         if(sen[1]=="1") #new story
             memCount=1
-            memAry = Array(Float64,length(dict),size(data,1))
+            memAry = zeros(Float64,length(dict),14)
 
             end #clear mem,count
         if(!contains(sen[2],"?")) #not question
@@ -160,25 +178,80 @@ end
             memCount+=1
        
         else
-            y_memloc=zeros(length(memAry))
+            y_memloc=zeros(size(memAry,2))
             y_memloc[clu]=1
-            
-            memLoc=O_module(memAry,newMem,y_memloc,trainmod)
-            println(length(memLoc))
+            trquestioncount+=1
+            memLoc=O_module(memAry,newMem,y_memloc,trainmod,o1_costmodel)
+           
             dictn = copy(dict)
             dictn[ans] = 1
-           println(memLoc)
+           if(clu==prob_vec2indice(memLoc))
+               trsum+=1
+               end
+            y_answordloc = collect(values(dictn))
+            #println(memAry[:,prob_vec2indice(memLoc)])
+            #f_answer=R_module(memAry[:,prob_vec2indice(memLoc)], newMem, y_answordloc, dict, trainmod,r_costmodel)
+            f_answer=R_module(memAry[:,clu], newMem, y_answordloc, dict, trainmod,r_costmodel)
+            #println(i)
+            #println("Answer : ",f_answer) 
+            #println("RightAnswer : ",ans,".")
+            
+
+        end#question
+            
+
+        end#data iterator(for)
+print(trsum/trquestioncount,"\t")          
+           ##Test
+            trainmod=false
+        memCount=1
+            sum=0
+            questionquantity=0
+    for i=1:size(test_data,1)
+        sen=test_data[i,1]
+        ans=test_data[i,2]
+        clu=test_data[i,3]
+        newMem = I_module(sen[2],dict)
+        
+        if(sen[1]=="1") #new story
+            memCount=1
+            memAry = zeros(Float64,length(dict),14)
+
+            end #clear mem,count
+        if(!contains(sen[2],"?")) #not question
+            G_module(memAry,newMem,memCount)
+            memCount+=1
+       
+        else
+            questionquantity+=1
+            y_memloc=zeros(size(memAry,2))
+            y_memloc[clu]=1
+            
+            memLoc=O_module(memAry,newMem,y_memloc,trainmod,o1_costmodel)
+            #println("memLoc",memLoc)
+            #println("clu",clu)
+            dictn = copy(dict)
+            dictn[ans] = 1
+            if(clu==prob_vec2indice(memLoc))
+                sum+=1
+            #else
+            #    println("thiiis")
+                end
             y_answordloc = collect(values(dictn))
             
-            f_answer=R_module(vec(memLoc), newMem, y_answordloc, dict, trainmod)
-            println("Answer : ",f_answer) 
-            println("RightAnswer : ",ans,".")
-
+            f_answer=R_module(memAry[:,clu], newMem, y_answordloc, dict, trainmod,r_costmodel)
+            #f_answer=R_module(memAry[:,prob_vec2indice(memLoc)], newMem, y_answordloc, dict, trainmod,r_costmodel)
+            #println("Answer : ",f_answer) 
+            #println("RightAnswer : ",ans,".")
+            #println("vector of R module response: ",get(r_costmodel,:r))
 
         end#question
 
-            end#data iterator(for)
+            end#test_data iterator(for)
+println(sum/questionquantity)
+end#epochs
 
+            ##
 
 
     ##

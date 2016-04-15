@@ -94,11 +94,12 @@ end #R_module
 
 #############################################################################################
 #Auxilary functions
-@knet function o1_cost(x; winit=Gaussian(0,.1),mem_length=14)
+@knet function o1_cost(x; winit=Gaussian(0,.1),mem_length=14,pdrop=0.5,lr=0.01)
     h    = wbf(x; out=50, f=:relu, winit=winit)
     j    = wbf(h; out=50, f=:relu, winit=winit)
     l    = wbf(j; out=50, f=:relu, winit=winit)
     t    = wbf(l; out=50, f=:relu, winit=winit)
+    fndrop = drop(t; pdrop=pdrop)
     #t = repeat(x; frepeat=:wbf, nrepeat=10, out=30,f=:relu,winit=winit)
     return wbf(t; out=mem_length, f=:soft, winit=winit)
 end
@@ -117,7 +118,7 @@ function train(f, data, loss)
     end
 end
 function train_o1(o1_costmodel, xmemVec, y_memloc, loss, length)
-    forw(o1_costmodel,xmemVec;mem_length=length)
+    forw(o1_costmodel,xmemVec;mem_length=length,dropout=true)
     #forw(o1_costmodel,xmemVec)
     back(o1_costmodel,y_memloc, loss)
     update!(o1_costmodel)
@@ -154,9 +155,11 @@ end
 #############################################################################################
     o1_costmodel = compile(:o1_cost)
     r_costmodel = compile(:r_cost)
-    setp(o1_costmodel, lr=0.001)
+    olr=0.01
+    setp(o1_costmodel, lr=0.01)
+    old=0
     ## Main Flow
-    for(k=1:60)
+    for(k=1:100)
        # println("epoch",k)
         trainmod=true
         memCount=1
@@ -201,7 +204,11 @@ end
             
 
         end#data iterator(for)
-print(trsum/trquestioncount,"\t")          
+           # if((trsum/trquestioncount)>0.5)
+           #     setp(o1_costmodel, pdrop=0.77)
+           # end
+                
+print(k,"\t",trsum/trquestioncount,"\t")          
            ##Test
             trainmod=false
         memCount=1
@@ -247,8 +254,18 @@ print(trsum/trquestioncount,"\t")
 
         end#question
 
-            end#test_data iterator(for)
-println(sum/questionquantity)
+        end#test_data iterator(for)
+           
+            println(sum/questionquantity)
+            if(old>(sum/questionquantity))
+                
+                olr =0.8 * olr
+                setp(o1_costmodel,lr=olr)
+               
+               setp(o1_costmodel, pdrop=0.80)
+            
+            end
+             old=sum/questionquantity   
 end#epochs
 
             ##

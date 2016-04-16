@@ -62,7 +62,7 @@ end #G_module
 function O_module(memAry,x,y_memloc,trainmod,o1_costmodel)
     # by this configuration, the module needs supporting facts, which are locations of the related memories as onehot vec.
  #sizehint for memVec to be enough long(later-for performance)
-    xmemVec = Float64[]
+    #xmemVec = Float64[]
     #append!(xmemVec,x)
     #append!(xmemVec,vec(memAry))
     
@@ -79,11 +79,17 @@ function R_module(mem1, x, y_answordloc, dict, trainmod,r_costmodel)
     append!(xansVec,mem1)
     
     words = collect(keys(dict))
-    if(trainmod)
-        train_r(r_costmodel, xansVec, y_answordloc, softloss, length(words))# related memory location probability maximization training
+    dictVec = collect(values(dict))
+    dictMatrix = zeros(Float64,38,length(words))
+    for(ind=1:length(words))
+        dictMatrix[ind,ind] = 1
     end
-    ans_vec = forw(r_costmodel, xansVec;dict_length=length(words))
-    answer = words[prob_vec2indice(ans_vec)] # finds indice of maximum value from the vector of probabilities. 
+    
+    if(trainmod)
+        train_r(r_costmodel, xansVec, dictMatrix, y_answordloc, softloss, length(words))# related memory location probability maximization training
+    end
+    ans_vec = forw(r_costmodel, xansVec, dictMatrix ;dict_length=length(words))
+    answer = words[prob_vec2indice(ans_vec;size_limit=19)] # finds indice of maximum value from the vector of probabilities. 
     return answer
     
 end #R_module
@@ -104,9 +110,13 @@ end #R_module
     t=wbf(r; out=mem_length, f=:soft, winit=winit)
     return t
 end
-@knet function r_cost(x; winit=Gaussian(0,.1),dict_length=19)
-    h    = wbf(x; out=30, f=:relu, winit=winit)
-    j    = wbf(h; out=30, f=:relu, winit=winit)
+@knet function r_cost(x, dictMatrix ; winit=Gaussian(0,.1),dict_length=19,a=50)
+    u = par(init=winit, dims=(a,38))#38: generalise as parameter or 0!!!
+        m = transp(dictMatrix)*transp(u)
+        n = u*x
+    j = m*n
+    #t = wbf(j; out=30, f=:relu, winit=winit)
+    #k = wbf(t; out=30, f=:relu, winit=winit)
     r = wbf(j; out=dict_length, f=:soft, winit=winit)
     return r
 end
@@ -124,8 +134,8 @@ function train_o1(o1_costmodel, x , memAry, y_memloc, loss, length)
     back(o1_costmodel,y_memloc, loss)
     update!(o1_costmodel)
 end
-function train_r(r_costmodel, xansVec, y_ansloc, loss, length)
-    forw(r_costmodel,xansVec;dict_length=length)
+function train_r(r_costmodel, xansVec,dictMatrix, y_ansloc, loss, length)
+    forw(r_costmodel,xansVec,dictMatrix;dict_length=length)
      #forw(r_costmodel,xansVec)
     back(r_costmodel,y_ansloc, loss)
     update!(r_costmodel)
@@ -141,10 +151,15 @@ function test(f,data,loss)
         sumloss /numloss
     end
 
-function prob_vec2indice(words)
+function prob_vec2indice(words;size_limit=0)
     max=0
-    pred_ans_loc = 0
-    for w = 1:length(words)
+    pred_ans_loc = 1
+    if(size_limit==0)
+        limit=length(words)
+    else
+        limit=size_limit
+        end
+    for w = 1:limit
         if(words[w]>max)
             max = words[w]
             pred_ans_loc = w
@@ -157,7 +172,8 @@ end
     o1_costmodel = compile(:o1_cost)
     r_costmodel = compile(:r_cost)
     olr=0.0001
-    setp(o1_costmodel, lr=olr)
+        setp(o1_costmodel, lr=olr)
+        setp(r_costmodel, lr=0.0001)
     old=0
     ## Main Flow
     for(k=1:100)
@@ -166,6 +182,8 @@ end
         memCount=1
         trquestioncount=0
         trsum=0
+        tr_correct_response_count=0
+        test_correct_response_count=0
     for i=1:size(data,1)
         sen=data[i,1]
         ans=data[i,2]
@@ -200,8 +218,10 @@ end
             #println(i)
             #println("Answer : ",f_answer) 
             #println("RightAnswer : ",ans,".")
-            
-
+            #println("vector of R module response: ",get(r_costmodel,:r))
+               if(f_answer==ans)
+                   tr_correct_response_count+=1
+                   end
         end#question
             
 
@@ -210,7 +230,7 @@ end
            #     setp(o1_costmodel, pdrop=0.77)
            # end
                 
-print(k,"\t",trsum/trquestioncount,"\t")          
+#print(k,"\t",trsum/trquestioncount,"\t")          
            ##Test
             trainmod=false
         memCount=1
@@ -253,12 +273,15 @@ print(k,"\t",trsum/trquestioncount,"\t")
             #println("Answer : ",f_answer) 
             #println("RightAnswer : ",ans,".")
             #println("vector of R module response: ",get(r_costmodel,:r))
-
+                if(f_answer==ans)
+                   test_correct_response_count+=1
+                   end
         end#question
 
         end#test_data iterator(for)
            
-            println(sum/questionquantity)
+            println(k,"\t",trsum/trquestioncount,"\t",sum/questionquantity,"\t R_Module training: ",tr_correct_response_count/trquestioncount,"\t test:",test_correct_response_count/questionquantity)
+            #println(k,"\t",trsum/trquestioncount,"\t",sum/questionquantity,"\t",tr_correct_response_count/trquestioncount,"\t",test_correct_response_count/questionquantity)
             if(old>(sum/questionquantity))
                 
                 olr =0.8 * olr

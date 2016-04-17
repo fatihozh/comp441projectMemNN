@@ -77,19 +77,20 @@ function R_module(mem1, x, y_answordloc, dict, trainmod,r_costmodel)
     xansVec = Float64[]
     append!(xansVec,x)
     append!(xansVec,mem1)
+    append!(xansVec,zeros(19))
     
     words = collect(keys(dict))
     dictVec = collect(values(dict))
-    dictMatrix = zeros(Float64,38,length(words))
+    dictMatrix = zeros(Float64,57,length(words))
     for(ind=1:length(words))
-        dictMatrix[ind,ind] = 1
+        dictMatrix[ind+38,ind] = 1
     end
     
     if(trainmod)
         train_r(r_costmodel, xansVec, dictMatrix, y_answordloc, softloss, length(words))# related memory location probability maximization training
     end
     ans_vec = forw(r_costmodel, xansVec, dictMatrix ;dict_length=length(words))
-    answer = words[prob_vec2indice(ans_vec;size_limit=19)] # finds indice of maximum value from the vector of probabilities. 
+    answer = words[prob_vec2indice(ans_vec)] # finds indice of maximum value from the vector of probabilities. 
     return answer
     
 end #R_module
@@ -110,8 +111,8 @@ end #R_module
     t=wbf(r; out=mem_length, f=:soft, winit=winit)
     return t
 end
-@knet function r_cost(x, dictMatrix ; winit=Gaussian(0,.1),dict_length=19,a=50)
-    u = par(init=winit, dims=(a,38))#38: generalise as parameter or 0!!!
+@knet function r_cost(x, dictMatrix ; winit=Gaussian(0,.5),dict_length=19,a=100)
+    u = par(init=winit, dims=(a,57))#38: generalise as parameter or 0!!!
         m = transp(dictMatrix)*transp(u)
         n = u*x
     j = m*n
@@ -210,7 +211,8 @@ end
             dictn[ans] = 1
            if(clu==prob_vec2indice(memLoc))
                trsum+=1
-               end
+           end
+            
             y_answordloc = collect(values(dictn))
             #println(memAry[:,prob_vec2indice(memLoc)])
             #f_answer=R_module(memAry[:,prob_vec2indice(memLoc)], newMem, y_answordloc, dict, trainmod,r_costmodel)

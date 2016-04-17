@@ -201,6 +201,7 @@ end
             memCount+=1
        
         else
+            memCount+=1
             y_memloc=zeros(size(memAry,2))
             y_memloc[clu]=1
             trquestioncount+=1
@@ -254,6 +255,7 @@ end
             memCount+=1
        
         else
+            memCount+=1
             questionquantity+=1
             y_memloc=zeros(size(memAry,2))
             y_memloc[clu]=1

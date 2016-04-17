@@ -174,7 +174,7 @@ end
     r_costmodel = compile(:r_cost)
     olr=0.0001
         setp(o1_costmodel, lr=olr)
-        setp(r_costmodel, lr=0.0001)
+        setp(r_costmodel, lr=0.00001)
     old=0
     ## Main Flow
     for(k=1:100)

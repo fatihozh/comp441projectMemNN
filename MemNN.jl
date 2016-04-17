@@ -111,7 +111,7 @@ end #R_module
     t=wbf(r; out=mem_length, f=:soft, winit=winit)
     return t
 end
-@knet function r_cost(x, dictMatrix ; winit=Gaussian(0,.5),dict_length=19,a=100)
+@knet function r_cost(x, dictMatrix ; winit=Gaussian(0,.1),dict_length=19,a=100)
     u = par(init=winit, dims=(a,57))#38: generalise as parameter or 0!!!
         m = transp(dictMatrix)*transp(u)
         n = u*x

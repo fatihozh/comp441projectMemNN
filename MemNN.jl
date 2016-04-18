@@ -3,6 +3,7 @@ using Knet
 
 #Config
 trainmod=true
+memoryLength=14
 #
 
 
@@ -39,7 +40,7 @@ end
 #
 
 # Memory Initialization
-memAry = zeros(Float64,length(dict),14)
+memAry = zeros(Float64,length(dict),memoryLength)
 #
 
 #########################################################################################################
@@ -77,13 +78,13 @@ function R_module(mem1, x, y_answordloc, dict, trainmod,r_costmodel)
     xansVec = Float64[]
     append!(xansVec,x)
     append!(xansVec,mem1)
-    append!(xansVec,zeros(19))
+    append!(xansVec,zeros(length(dict)))
     
     words = collect(keys(dict))
     dictVec = collect(values(dict))
-    dictMatrix = zeros(Float64,57,length(words))
-    for(ind=1:length(words))
-        dictMatrix[ind+38,ind] = 1
+    dictMatrix = zeros(Float64,length(words)*3,length(dict))
+    for(ind=1:length(dict))
+        dictMatrix[ind+length(words)*2,ind] = 1
     end
     
     if(trainmod)
@@ -102,7 +103,7 @@ end #R_module
 #############################################################################################
 #Auxilary functions
     @knet function o1_cost(x,memAry; winit=Gaussian(0,.1),mem_length=14,pdrop=0.5,lr=0.001,a=50)
-        u = par(init=winit, dims=(a,19))
+        u = par(init=winit, dims=(a,0))#19
         m = transp(memAry)*transp(u)
         n = u*x
         r = m*n
@@ -112,7 +113,7 @@ end #R_module
     return t
 end
 @knet function r_cost(x, dictMatrix ; winit=Gaussian(0,.1),dict_length=19,a=100)
-    u = par(init=winit, dims=(a,57))#38: generalise as parameter or 0!!!
+    u = par(init=winit, dims=(a,0))
         m = transp(dictMatrix)*transp(u)
         n = u*x
     j = m*n
@@ -170,21 +171,27 @@ function prob_vec2indice(words;size_limit=0)
 end
         
 #############################################################################################
-    o1_costmodel = compile(:o1_cost)
-    r_costmodel = compile(:r_cost)
-    olr=0.0001
-        setp(o1_costmodel, lr=olr)
-        setp(r_costmodel, lr=0.00001)
-    old=0
-    ## Main Flow
+    o1_costmodel = compile(:o1_cost) #Knet Model Compilation for o1_costmodel
+    r_costmodel = compile(:r_cost)   #Knet Model Compilation for r_costmodel
+    olr=0.0001 # sets initial lr for training o1_costmodel(for decaying lr)
+    setp(o1_costmodel, lr=olr)
+    setp(r_costmodel, lr=0.00001) # sets initial lr for training r_costmodel
+    old=0 #for tracking 1 step older test performance
+ ## Main Flow
+ ############################################################################################
+   #EPOCH Loop
     for(k=1:100)
        # println("epoch",k)
-        trainmod=true
-        memCount=1
+        trainmod=true # TRAIN/TEST switch
+        memCount=1    #Counter for memory location
+        
+        #initialisations for statistics
         trquestioncount=0
         trsum=0
         tr_correct_response_count=0
         test_correct_response_count=0
+        #################################
+   #Train Data Loop     
     for i=1:size(data,1)
         sen=data[i,1]
         ans=data[i,2]
@@ -193,7 +200,7 @@ end
         
         if(sen[1]=="1") #new story
             memCount=1
-            memAry = zeros(Float64,length(dict),14)
+            memAry = zeros(Float64,length(dict),memoryLength)
 
             end #clear mem,count
         if(!contains(sen[2],"?")) #not question
@@ -247,7 +254,7 @@ end
         
         if(sen[1]=="1") #new story
             memCount=1
-            memAry = zeros(Float64,length(dict),14)
+            memAry = zeros(Float64,length(dict),memoryLength)
 
             end #clear mem,count
         if(!contains(sen[2],"?")) #not question
@@ -286,6 +293,9 @@ end
            
             println(k,"\t",trsum/trquestioncount,"\t",sum/questionquantity,"\t R_Module training: ",tr_correct_response_count/trquestioncount,"\t test:",test_correct_response_count/questionquantity)
             #println(k,"\t",trsum/trquestioncount,"\t",sum/questionquantity,"\t",tr_correct_response_count/trquestioncount,"\t",test_correct_response_count/questionquantity)
+            
+            #For Decaying lr by o1_costmodel
+            ###########################################
             if(old>(sum/questionquantity))
                 
                 olr =0.8 * olr
@@ -294,7 +304,8 @@ end
                setp(o1_costmodel, pdrop=0.50)
             
             end
-             old=sum/questionquantity   
+                old=sum/questionquantity
+            ###########################################
 end#epochs
 
             ##

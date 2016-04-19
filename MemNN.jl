@@ -1,9 +1,9 @@
-#module MemNN
+
 using Knet
 
 #Config
 trainmod=true
-memoryLength=14
+global memoryLength=15
 #
 
 
@@ -60,37 +60,42 @@ function G_module(memAry,newMem,memCount)
     memAry[:,memCount] = newMem   #updates memory by adding BoW vectors to the list of memories
 end #G_module
 
-function O_module(memAry,x,y_memloc,trainmod,o1_costmodel)
+function O_module(memAry,x,y_memloc,trainmod,o1_costmodel,memCount)
     # by this configuration, the module needs supporting facts, which are locations of the related memories as onehot vec.
  #sizehint for memVec to be enough long(later-for performance)
     #xmemVec = Float64[]
     #append!(xmemVec,x)
     #append!(xmemVec,vec(memAry))
+    xp =placement(x,memCount,1)
+    memAryp= placement(memAry,1,2)
     
     if(trainmod)
-        train_o1(o1_costmodel, x, memAry, y_memloc, softloss,size(memAry,2))# related memory location probability maximization training
+        train_o1(o1_costmodel, xp, memAryp, y_memloc, softloss,size(memAry,2))# related memory location probability maximization training
     end
-    return forw(o1_costmodel, x, memAry;mem_length=size(memAry,2)) #returns probabilities of memorylocations
+    return forw(o1_costmodel, xp, memAryp;mem_length=size(memAry,2)) #returns probabilities of memorylocations
 end #O_module
 
 function R_module(mem1, x, y_answordloc, dict, trainmod,r_costmodel)
 
-    xansVec = Float64[]
-    append!(xansVec,x)
-    append!(xansVec,mem1)
-    append!(xansVec,zeros(length(dict)))
+    #xansVec = Float64[]
+    #append!(xansVec,x)
+    #append!(xansVec,mem1)
+    #append!(xansVec,zeros(length(dict)))
+
+    xp=placement(x,0,1)+placement(mem1,0,2)
+    
     
     words = collect(keys(dict))
     dictVec = collect(values(dict))
-    dictMatrix = zeros(Float64,length(words)*3,length(dict))
+    dictMatrix = zeros(Float64,length(words)*4+memoryLength,length(dict))
     for(ind=1:length(dict))
-        dictMatrix[ind+length(words)*2,ind] = 1
+        dictMatrix[ind+length(words)*3,ind] = 1
     end
     
     if(trainmod)
-        train_r(r_costmodel, xansVec, dictMatrix, y_answordloc, softloss, length(words))# related memory location probability maximization training
+        train_r(r_costmodel, xp, dictMatrix, y_answordloc, softloss, length(words))# related memory location probability maximization training
     end
-    ans_vec = forw(r_costmodel, xansVec, dictMatrix ;dict_length=length(words))
+    ans_vec = forw(r_costmodel, xp, dictMatrix ;dict_length=length(words))
     answer = words[prob_vec2indice(ans_vec)] # finds indice of maximum value from the vector of probabilities. 
     return answer
     
@@ -102,7 +107,7 @@ end #R_module
 
 #############################################################################################
 #Auxilary functions
-    @knet function o1_cost(x,memAry; winit=Gaussian(0,.1),mem_length=14,pdrop=0.5,lr=0.001,a=50)
+    @knet function o1_cost(x,memAry; winit=Gaussian(0,.1),mem_length=15,pdrop=0.5,lr=0.001,a=50)
         u = par(init=winit, dims=(a,0))#19
         m = transp(memAry)*transp(u)
         n = u*x
@@ -169,7 +174,29 @@ function prob_vec2indice(words;size_limit=0)
         end
         return pred_ans_loc
 end
+        function placement(vec_Mat,memCount,slot)
+
+        vm=zeros(length(dict)*4+memoryLength,size(vec_Mat,2))
         
+            
+                if(size(vec_Mat,2)==1)
+                   vm=zeros(length(vec_Mat)*4 + memoryLength)
+        #Slot arrangement
+                    vm[(slot-1)*length(dict)+1:slot*length(dict)]=vec_Mat
+                    if(memCount!=0)
+                        vm[4*length(dict)+memCount]=1
+                        end
+                   else
+                        vm[(slot-1)*length(dict)+1:slot*length(dict),:]=vec_Mat
+                        if(memCount!=0)
+               for i=1:memoryLength
+               vm[4*length(dict)+i,i]=1
+               end
+               end
+               end
+               
+return vm
+            end
 #############################################################################################
     o1_costmodel = compile(:o1_cost) #Knet Model Compilation for o1_costmodel
     r_costmodel = compile(:r_cost)   #Knet Model Compilation for r_costmodel
@@ -183,7 +210,7 @@ end
     for(k=1:100)
        # println("epoch",k)
         trainmod=true # TRAIN/TEST switch
-        memCount=1    #Counter for memory location
+        global memCount=1    #Counter for memory location
         
         #initialisations for statistics
         trquestioncount=0
@@ -208,18 +235,22 @@ end
             memCount+=1
        
         else
-            memCount+=1
+           
             y_memloc=zeros(size(memAry,2))
             y_memloc[clu]=1
-            trquestioncount+=1
-            memLoc=O_module(memAry,newMem,y_memloc,trainmod,o1_costmodel)
+        #1   trquestioncount+=1
+            #if(memCount==15)
+            #    println("15 : ",i)
+            #    end
+            memLoc=O_module(memAry,newMem,y_memloc,trainmod,o1_costmodel,memCount)
+             
            #println("memLoc",memLoc)
             #println("clu",clu)
             dictn = copy(dict)
             dictn[ans] = 1
-           if(clu==prob_vec2indice(memLoc))
-               trsum+=1
-           end
+        #1   if(clu==prob_vec2indice(memLoc))
+        #1       trsum+=1
+        #1   end
             
             y_answordloc = collect(values(dictn))
             #println(memAry[:,prob_vec2indice(memLoc)])
@@ -229,9 +260,10 @@ end
             #println("Answer : ",f_answer) 
             #println("RightAnswer : ",ans,".")
             #println("vector of R module response: ",get(r_costmodel,:r))
-               if(f_answer==ans)
-                   tr_correct_response_count+=1
-                   end
+         #1      if(f_answer==ans)
+         #1          tr_correct_response_count+=1
+         #1      end
+                   memCount+=1
         end#question
             
 
@@ -240,12 +272,59 @@ end
            #     setp(o1_costmodel, pdrop=0.77)
            # end
                 
-#print(k,"\t",trsum/trquestioncount,"\t")          
-           ##Test
+            #print(k,"\t",trsum/trquestioncount,"\t")
+            #######################################
+            trainmod=false
+            ### Training statistics
+            for i=1:size(data,1)
+        sen=data[i,1]
+        ans=data[i,2]
+        clu=data[i,3]
+        newMem = I_module(sen[2],dict)
+        
+        if(sen[1]=="1") #new story
+            memCount=1
+            memAry = zeros(Float64,length(dict),memoryLength)
+
+            end #clear mem,count
+        if(!contains(sen[2],"?")) #not question
+            G_module(memAry,newMem,memCount)
+            memCount+=1
+       
+        else
+           
+            y_memloc=zeros(size(memAry,2))
+            y_memloc[clu]=1
+            trquestioncount+=1
+            
+            memLoc=O_module(memAry,newMem,y_memloc,trainmod,o1_costmodel,memCount)
+             
+           #
+            dictn = copy(dict)
+            dictn[ans] = 1
+           if(clu==prob_vec2indice(memLoc))
+               trsum+=1
+           end
+            
+            y_answordloc = collect(values(dictn))
+           
+            #f_answer=R_module(memAry[:,prob_vec2indice(memLoc)], newMem, y_answordloc, dict, trainmod,r_costmodel)
+            f_answer=R_module(memAry[:,clu], newMem, y_answordloc, dict, trainmod,r_costmodel)
+           
+               if(f_answer==ans)
+                   tr_correct_response_count+=1
+               end
+                   memCount+=1
+               end#question
+               end#for
+            ####
+            ##############################################################
+            ###Test
             trainmod=false
         memCount=1
             sum=0
             questionquantity=0
+ 
     for i=1:size(test_data,1)
         sen=test_data[i,1]
         ans=test_data[i,2]
@@ -262,12 +341,13 @@ end
             memCount+=1
        
         else
-            memCount+=1
+            
             questionquantity+=1
             y_memloc=zeros(size(memAry,2))
             y_memloc[clu]=1
             
-            memLoc=O_module(memAry,newMem,y_memloc,trainmod,o1_costmodel)
+            memLoc=O_module(memAry,newMem,y_memloc,trainmod,o1_costmodel,memCount)
+            
             #println("test:memLoc",memLoc)
             #println("clu",clu)
             dictn = copy(dict)
@@ -286,7 +366,8 @@ end
             #println("vector of R module response: ",get(r_costmodel,:r))
                 if(f_answer==ans)
                    test_correct_response_count+=1
-                   end
+                end
+                    memCount+=1
         end#question
 
         end#test_data iterator(for)

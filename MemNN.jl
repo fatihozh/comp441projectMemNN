@@ -26,18 +26,42 @@ end
 
 #Dictionary initialization (adding each word in dataset to dictionary.)
 dict = Dict{ASCIIString,Float64}()
-dictdata = readdlm("/Users/fatihozhamaratli/Downloads/tasksv11/en/qa1_single-supporting-fact_train.txt",' ')
-for s in dictdata
-    if(typeof(s)!=Int64&&s!="")
+#dictdata = readdlm("/Users/fatihozhamaratli/Downloads/tasksv11/en/qa4_two-arg-relations_test.txt",' ')
+#dictdata=split(dictdata,'\')
+#for s in dictdata
+#    if(typeof(s)!=Int64&&s!="")
+#        if(contains(s,"\t"))
+#           s=strip(s,['?','!',',','.','\t','1','2','3','4','5','6','7','8','9','0']) # ? char is undesired near the words
+#           else
+#           s=strip(s,['?','!',',','.'])
+#           end
+#        get!(dict,s,0)
+#    end
+#end
+for i=1:size(data,1)
+    s=data[i,1][2]
+if(typeof(s)!=Int64&&s!="")
         if(contains(s,"\t"))
            s=strip(s,['?','!',',','.','\t','1','2','3','4','5','6','7','8','9','0']) # ? char is undesired near the words
            else
            s=strip(s,['?','!',',','.'])
-           end
-        get!(dict,s,0)
+        end
+            for t in split(s,' ')
+        get!(dict,lowercase(t),0)
+        end
+        end
+    s=data[i,2]
+if(s!="")
+        if(contains(s,"\t"))
+           s=strip(s,['?','!',',','.','\t','1','2','3','4','5','6','7','8','9','0']) # ? char is undesired near the words
+           else
+           s=strip(s,['?','!',',','.'])
+        end
+            for t in split(s,' ')
+        get!(dict,lowercase(t),0)
+        end
+        end
     end
-end
-#
 
 # Memory Initialization
 memAry = zeros(Float64,length(dict),memoryLength)
@@ -49,7 +73,7 @@ memAry = zeros(Float64,length(dict),memoryLength)
      dictn=copy(dict)   
     spltstr = split(str) #sentence tokenize
         for s in spltstr
-            s=strip(s,['?','!',',','.','\t'])
+            s=strip(lowercase(s),['?','!',',','.','\t'])
         dictn[s]=(dictn[s]+1) # going over each word and updating dict
     end
     return collect(values(dictn)) # array of BoW
@@ -107,23 +131,23 @@ end #R_module
 
 #############################################################################################
 #Auxilary functions
-    @knet function o1_cost(x,memAry; winit=Gaussian(0,.1),mem_length=15,pdrop=0.5,lr=0.001,a=50)
+    @knet function o1_cost(x,memAry; winit=Gaussian(0,.1),mem_length=15,pdrop=0.5,lr=0.001,a=50,l2reg=false)
         u = par(init=winit, dims=(a,0))#19
         m = transp(memAry)*transp(u)
         n = u*x
         r = m*n
     #fndrop = drop(t; pdrop=pdrop)
-    #t = repeat(x; frepeat=:wbf, nrepeat=10, out=30,f=:relu,winit=winit)
+        #t = repeat(x; frepeat=:wbf, nrepeat=10, out=30,f=:relu,winit=winit)
+     #k= wbf(r; out=30, f=:relu, winit=winit)    
     t=wbf(r; out=mem_length, f=:soft, winit=winit)
     return t
 end
-@knet function r_cost(x, dictMatrix ; winit=Gaussian(0,.1),dict_length=19,a=100)
+@knet function r_cost(x, dictMatrix ; winit=Gaussian(0,.1),dict_length=24,a=100)
     u = par(init=winit, dims=(a,0))
         m = transp(dictMatrix)*transp(u)
         n = u*x
     j = m*n
     #t = wbf(j; out=30, f=:relu, winit=winit)
-    #k = wbf(t; out=30, f=:relu, winit=winit)
     r = wbf(j; out=dict_length, f=:soft, winit=winit)
     return r
 end
@@ -204,6 +228,8 @@ return vm
     setp(o1_costmodel, lr=olr)
     setp(r_costmodel, lr=0.00001) # sets initial lr for training r_costmodel
     old=0 #for tracking 1 step older test performance
+                    setp(o1_costmodel,mem_length=memoryLength)
+                    setp(r_costmodel,dict_length=length(dict))
  ## Main Flow
  ############################################################################################
    #EPOCH Loop
@@ -244,7 +270,7 @@ return vm
             #    end
             memLoc=O_module(memAry,newMem,y_memloc,trainmod,o1_costmodel,memCount)
              
-           #println("memLoc",memLoc)
+            #println("memLoc",memLoc)
             #println("clu",clu)
             dictn = copy(dict)
             dictn[ans] = 1
@@ -372,20 +398,20 @@ return vm
 
         end#test_data iterator(for)
            
-            println(k,"\t",trsum/trquestioncount,"\t",sum/questionquantity,"\t R_Module training: ",tr_correct_response_count/trquestioncount,"\t test:",test_correct_response_count/questionquantity)
+            println(k,"\t",trsum/trquestioncount,"\t",sum/questionquantity,"\t R_Module training: \t",tr_correct_response_count/trquestioncount,"\t",test_correct_response_count/questionquantity)
             #println(k,"\t",trsum/trquestioncount,"\t",sum/questionquantity,"\t",tr_correct_response_count/trquestioncount,"\t",test_correct_response_count/questionquantity)
             
             #For Decaying lr by o1_costmodel
             ###########################################
-            if(old>(sum/questionquantity))
-                
-                olr =0.8 * olr
-                setp(o1_costmodel,lr=olr)
-               
-               setp(o1_costmodel, pdrop=0.50)
-            
-            end
-                old=sum/questionquantity
+         #   if(old>(sum/questionquantity))
+         #       
+         #       olr =0.8 * olr
+         #       setp(o1_costmodel,lr=olr)
+         #      
+         #      setp(o1_costmodel, pdrop=0.50)
+         #   
+         #   end
+         #       old=sum/questionquantity
             ###########################################
 end#epochs
 

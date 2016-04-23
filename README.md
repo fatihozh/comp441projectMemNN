@@ -13,4 +13,8 @@ The O module and R module don’t access to cost models directly. They run train
 o1_cost is a Knet Model/function, which takes  new input(question,X) and Memory Matrix(Y) as BoW representations. And trained  (X.U’.U.Y) with softmax classifier and softloss.
 r_cost is a Knet Model/function, which takes the question appended with memory1 (BoW) and dictMatrix(every word has a onehot representation). And trained  (X.U’.U.Y) with softmax classifier and softloss.
 
-The first for loop by mainflow part is for epochs and the first inner for loop is for traversing on  training data and training the models. Second inner for loop is for testing the model by test data. The statistics are printed for each epoch. 
+The first for loop by mainflow part is for epochs and the first inner for loop is for traversing on  training data and training the models. Second inner for loop is for testing the model by test data. The statistics are printed for each epoch.
+
+With additional commits, MemNN is modified such that the embedded word representations are large enough to posses slots for the 2.supporting fact and the absolute time vector.
+
+The 2supfactMemNN is for question answer pairs with two supporting facts. The O module finds most related first supporting fact according the question, than it finds the most related second supporting facts according to the question and first supporting fact. The cost functions for the first and second supporting facts are different. R module generates predicted answer according to question and 2 supporting facts.
